@@ -38,3 +38,10 @@ yarn-error.log*
 data/
 proxy/
 login_checkpoint.json
+
+modules/__pycache__
+
+emails.txt
+*.csv
+*.pyc
+

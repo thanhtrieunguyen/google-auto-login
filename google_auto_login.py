@@ -10,13 +10,15 @@ from pathlib import Path
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QPushButton, QVBoxLayout, QHBoxLayout, 
                              QWidget, QLabel, QListWidget, QListWidgetItem, QMessageBox, 
                              QFileDialog, QSpinBox, QCheckBox, QProgressBar, QComboBox,
-                             QTextEdit, QDialog, QDialogButtonBox, QLineEdit)
+                             QTextEdit, QDialog, QDialogButtonBox, QLineEdit, QFrame)
 from PyQt5.QtCore import Qt, QThread, pyqtSignal, QTimer
+from PyQt5.QtGui import QFont, QPalette, QColor
 
 # Import các module đã tách
 from modules.logger_util import setup_logger
 from modules.dialogs import CaptchaDialog
 from modules.login_thread import LoginThread, SELENIUM_AVAILABLE
+from modules.network_usage import NetworkUsageMonitor
 
 # Khởi tạo logger
 logger, log_file_path = setup_logger()
@@ -33,6 +35,7 @@ class GoogleLoginTool(QMainWindow):
         self.current_csv_file = ""  # Track the current CSV file
         self.checkpoint_data = self.load_checkpoint()
         self.captcha_event = None
+        self.network_usage_label = None  # Sẽ khởi tạo trong init_ui
         
         self.init_ui()
         self.load_csv()  # Automatically load the CSV file
@@ -41,40 +44,119 @@ class GoogleLoginTool(QMainWindow):
     
     def init_ui(self):
         """Set up the user interface"""
-        self.setWindowTitle("Google Account Login Tool")
-        self.setGeometry(100, 100, 900, 700)
+        self.setWindowTitle("Tự động đăng nhập Google")
+        self.setGeometry(50, 50, 1000, 800)
+        
+        # Set application style
+        self.setStyleSheet("""
+            QMainWindow {
+                background-color: #f5f5f5;
+            }
+            QLabel {
+                color: #333333;
+                font-size: 12px;
+            }
+            QPushButton {
+                background-color: #4285f4;
+                color: white;
+                border: none;
+                padding: 8px 16px;
+                border-radius: 4px;
+                font-weight: bold;
+                min-width: 100px;
+            }
+            QPushButton:hover {
+                background-color: #3367d6;
+            }
+            QPushButton:disabled {
+                background-color: #cccccc;
+            }
+            QPushButton#stopButton {
+                background-color: #ea4335;
+            }
+            QPushButton#stopButton:hover {
+                background-color: #d33426;
+            }
+            QPushButton#exportButton {
+                background-color: #34a853;
+            }
+            QPushButton#exportButton:hover {
+                background-color: #2d9249;
+            }
+            QLineEdit, QComboBox, QSpinBox {
+                padding: 6px;
+                border: 1px solid #ddd;
+                border-radius: 4px;
+                background-color: white;
+            }
+            QProgressBar {
+                border: 1px solid #ddd;
+                border-radius: 4px;
+                text-align: center;
+                background-color: #f8f8f8;
+            }
+            QProgressBar::chunk {
+                background-color: #4285f4;
+                border-radius: 3px;
+            }
+            QListWidget {
+                border: 1px solid #ddd;
+                border-radius: 4px;
+                background-color: white;
+            }
+            QTextEdit {
+                border: 1px solid #ddd;
+                border-radius: 4px;
+                background-color: white;
+                font-family: 'Consolas', monospace;
+            }
+        """)
         
         # Main layout
         main_layout = QVBoxLayout()
+        main_layout.setSpacing(15)
+        main_layout.setContentsMargins(20, 20, 20, 20)
         
-        # Title
-        title_label = QLabel("Google Account Login Automation Tool")
-        title_label.setStyleSheet("font-size: 18px; font-weight: bold; margin-bottom: 10px;")
-        main_layout.addWidget(title_label)
-        
-        # Instructions
-        instructions = """
-        <b>Instructions:</b>
-        1. Load accounts from CSV file (email;password format)
-        2. Configure login settings below
-        3. Click Start to begin automated login process
-        4. Use Stop to pause the process at any time
-        5. Use Resume to continue from where you left off
-        6. Log messages are saved to log file for later review
-        """
-        instructions_label = QLabel(instructions)
-        instructions_label.setStyleSheet("background-color: #f0f0f0; padding: 10px;")
-        main_layout.addWidget(instructions_label)
+        # Title section
+        title_frame = QFrame()
+        title_frame.setStyleSheet("""
+            QFrame {
+                background-color: #4285f4;
+                border-radius: 8px;
+                padding: 10px;
+            }
+            QLabel {
+                color: white;
+                font-size: 18px;
+                font-weight: bold;
+            }
+        """)
+        title_layout = QVBoxLayout()
+        title_label = QLabel("Tự động đăng nhập Google")
+        title_layout.addWidget(title_label)
+        title_frame.setLayout(title_layout)
+        main_layout.addWidget(title_frame)
         
         # Settings section
+        settings_frame = QFrame()
+        settings_frame.setStyleSheet("""
+            QFrame {
+                background-color: white;
+                border: 1px solid #ddd;
+                border-radius: 8px;
+                padding: 10px;
+            }
+        """)
         settings_layout = QHBoxLayout()
+        settings_layout.setSpacing(20)
         
         # File selection
         file_layout = QVBoxLayout()
-        file_layout.addWidget(QLabel("Account CSV File:"))
+        file_layout.addWidget(QLabel("<b>File tài khoản CSV:</b>"))
         
         file_select_layout = QHBoxLayout()
         self.file_path_label = QLabel("mail.csv")
+        self.file_path_label.setStyleSheet("color: #666;")
         file_select_layout.addWidget(self.file_path_label)
         
         self.browse_btn = QPushButton("Browse...")
@@ -90,7 +172,7 @@ class GoogleLoginTool(QMainWindow):
         
         # Browser selection
         browser_layout = QVBoxLayout()
-        browser_layout.addWidget(QLabel("Browser:"))
+        browser_layout.addWidget(QLabel("<b>Browser:</b>"))
         self.browser_combo = QComboBox()
         self.browser_combo.addItems(["Chrome", "Firefox", "Edge"])
         browser_layout.addWidget(self.browser_combo)
@@ -98,7 +180,7 @@ class GoogleLoginTool(QMainWindow):
         
         # Delay settings
         delay_layout = QVBoxLayout()
-        delay_layout.addWidget(QLabel("Delay between accounts (seconds):"))
+        delay_layout.addWidget(QLabel("<b>Khoảng thời gian giữa các tài khoản (giây):</b>"))
         self.delay_spinbox = QSpinBox()
         self.delay_spinbox.setRange(1, 60)
         self.delay_spinbox.setValue(5)
@@ -107,89 +189,139 @@ class GoogleLoginTool(QMainWindow):
         
         # Proxy input
         proxy_layout = QVBoxLayout()
-        proxy_layout.addWidget(QLabel("Proxy (host:port or user:pass@host:port):"))
+        proxy_layout.addWidget(QLabel("<b>Proxy (host:port or user:pass@host:port):</b>"))
         self.proxy_input = QLineEdit()
-        self.proxy_input.setPlaceholderText("Leave blank for no proxy")
+        self.proxy_input.setPlaceholderText("Để trống nếu không sử dụng proxy")
         proxy_layout.addWidget(self.proxy_input)
-        self.set_proxy_btn = QPushButton("Set Proxy")
+        self.set_proxy_btn = QPushButton("Đặt Proxy")
         self.set_proxy_btn.clicked.connect(self.set_proxy)
         proxy_layout.addWidget(self.set_proxy_btn)
         settings_layout.addLayout(proxy_layout)
 
-        main_layout.addLayout(settings_layout)
+        settings_frame.setLayout(settings_layout)
+        main_layout.addWidget(settings_frame)
         
         # Checkpoint status
+        checkpoint_frame = QFrame()
+        checkpoint_frame.setStyleSheet("""
+            QFrame {
+                background-color: #e8f0fe;
+                border-radius: 8px;
+                padding: 10px;
+            }
+        """)
         self.checkpoint_layout = QHBoxLayout()
         self.checkpoint_label = QLabel("Checkpoint: None")
-        self.checkpoint_label.setStyleSheet("color: blue; font-weight: bold;")
+        self.checkpoint_label.setStyleSheet("color: #1a73e8; font-weight: bold;")
         self.checkpoint_layout.addWidget(self.checkpoint_label)
         
-        self.clear_checkpoint_btn = QPushButton("Clear Checkpoint")
+        self.clear_checkpoint_btn = QPushButton("Xóa Checkpoint")
         self.clear_checkpoint_btn.clicked.connect(self.clear_checkpoint)
         self.clear_checkpoint_btn.setEnabled(False)
         self.checkpoint_layout.addWidget(self.clear_checkpoint_btn)
         
-        main_layout.addLayout(self.checkpoint_layout)
-        
-        # Log file info
-        log_layout = QHBoxLayout()
-        log_layout.addWidget(QLabel("Log File:"))
-        self.log_path_label = QLabel(log_file_path)
-        self.log_path_label.setStyleSheet("font-weight: bold;")
-        log_layout.addWidget(self.log_path_label)
-        
-        self.open_log_btn = QPushButton("Open Log Folder")
-        self.open_log_btn.clicked.connect(self.open_log_folder)
-        log_layout.addWidget(self.open_log_btn)
-        
-        main_layout.addLayout(log_layout)
-        
-        # Thêm vùng hiển thị log
-        main_layout.addWidget(QLabel("Log Messages:"))
-        self.log_display = QTextEdit()
-        self.log_display.setReadOnly(True)
-        self.log_display.setFixedHeight(150)
-        self.log_display.setStyleSheet("background-color: #f8f8f8; font-family: monospace;")
-        main_layout.addWidget(self.log_display)
+        checkpoint_frame.setLayout(self.checkpoint_layout)
+        main_layout.addWidget(checkpoint_frame)
         
         # Account list
-        main_layout.addWidget(QLabel("Accounts:"))
+        accounts_frame = QFrame()
+        accounts_frame.setStyleSheet("""
+            QFrame {
+                background-color: white;
+                border: 1px solid #ddd;
+                border-radius: 8px;
+                padding: 10px;
+            }
+        """)
+        accounts_layout = QVBoxLayout()
+        accounts_layout.addWidget(QLabel("<b>Tài khoản:</b>"))
         self.accounts_list = QListWidget()
         self.accounts_list.setAlternatingRowColors(True)
-        main_layout.addWidget(self.accounts_list)
+        self.accounts_list.setStyleSheet("""
+            QListWidget {
+                font-size: 12px;
+                line-height: 1.4;
+            }
+            QListWidget::item {
+                padding: 4px;
+            }
+            QListWidget::item:alternate {
+                background-color: #f8f8f8;
+            }
+        """)
+        accounts_layout.addWidget(self.accounts_list)
+        accounts_frame.setLayout(accounts_layout)
+        main_layout.addWidget(accounts_frame)
         
-        # Progress bar
-        main_layout.addWidget(QLabel("Progress:"))
+        # Progress section
+        progress_frame = QFrame()
+        progress_frame.setStyleSheet("""
+            QFrame {
+                background-color: white;
+                border: 1px solid #ddd;
+                border-radius: 8px;
+                padding: 10px;
+            }
+        """)
+        progress_layout = QVBoxLayout()
+        progress_layout.addWidget(QLabel("<b>Tiến trình:</b>"))
         self.progress_bar = QProgressBar()
-        main_layout.addWidget(self.progress_bar)
+        self.progress_bar.setStyleSheet("""
+            QProgressBar {
+                height: 20px;
+                text-align: center;
+                font-weight: bold;
+            }
+        """)
+        progress_layout.addWidget(self.progress_bar)
         
-        # Status
-        self.status_label = QLabel("Ready")
-        self.status_label.setStyleSheet("font-weight: bold;")
-        main_layout.addWidget(self.status_label)
+        self.status_label = QLabel("Sẵn sàng")
+        self.status_label.setStyleSheet("color: #1a73e8; font-weight: bold;")
+        progress_layout.addWidget(self.status_label)
+        
+        # Thêm label hiển thị mức tiêu thụ mạng
+        self.network_usage_label = QLabel("Mức tiêu thụ mạng: 0.00 MB")
+        self.network_usage_label.setStyleSheet("color: #388e3c; font-weight: bold;")
+        progress_layout.addWidget(self.network_usage_label)
+        
+        progress_frame.setLayout(progress_layout)
+        main_layout.addWidget(progress_frame)
         
         # Buttons
+        button_frame = QFrame()
+        button_frame.setStyleSheet("""
+            QFrame {
+                background-color: white;
+                border: 1px solid #ddd;
+                border-radius: 8px;
+                padding: 10px;
+            }
+        """)
         button_layout = QHBoxLayout()
+        button_layout.setSpacing(10)
         
-        self.start_btn = QPushButton("Start")
+        self.start_btn = QPushButton("Bắt đầu")
         self.start_btn.clicked.connect(self.start_login_process)
         button_layout.addWidget(self.start_btn)
         
-        self.resume_btn = QPushButton("Resume")
+        self.resume_btn = QPushButton("Tiếp tục")
         self.resume_btn.clicked.connect(self.resume_login_process)
         self.resume_btn.setEnabled(False)
         button_layout.addWidget(self.resume_btn)
         
-        self.stop_btn = QPushButton("Stop")
+        self.stop_btn = QPushButton("Dừng")
+        self.stop_btn.setObjectName("stopButton")
         self.stop_btn.clicked.connect(self.stop_login_process)
         self.stop_btn.setEnabled(False)
         button_layout.addWidget(self.stop_btn)
         
-        self.export_btn = QPushButton("Export Results")
+        self.export_btn = QPushButton("Xuất kết quả")
+        self.export_btn.setObjectName("exportButton")
         self.export_btn.clicked.connect(self.export_results)
         button_layout.addWidget(self.export_btn)
         
-        main_layout.addLayout(button_layout)
+        button_frame.setLayout(button_layout)
+        main_layout.addWidget(button_frame)
         
         # Set main widget
         container = QWidget()
@@ -218,10 +350,10 @@ class GoogleLoginTool(QMainWindow):
             if os.path.exists(self.checkpoint_file):
                 with open(self.checkpoint_file, 'r') as f:
                     data = json.load(f)
-                    logger.info(f"Loaded checkpoint data: {data}")
+                    logger.info(f"Tải checkpoint: {data}")
                     return data
         except Exception as e:
-            logger.error(f"Error loading checkpoint: {str(e)}")
+            logger.error(f"Lỗi tải checkpoint: {str(e)}")
         return {"file": "", "index": 0, "timestamp": ""}
     
     def save_checkpoint(self, index):
@@ -236,10 +368,10 @@ class GoogleLoginTool(QMainWindow):
                 json.dump(data, f)
             
             self.checkpoint_data = data
-            logger.info(f"Saved checkpoint: {data}")
+            logger.info(f"Lưu checkpoint: {data}")
             return True
         except Exception as e:
-            logger.error(f"Error saving checkpoint: {str(e)}")
+            logger.error(f"Lỗi lưu checkpoint: {str(e)}")
             return False
     
     def clear_checkpoint(self):
@@ -253,7 +385,6 @@ class GoogleLoginTool(QMainWindow):
             self.resume_btn.setEnabled(False)
             self.clear_checkpoint_btn.setEnabled(False)
             
-            self.log_display.append("Checkpoint đã được xóa")
             logger.info("Checkpoint đã được xóa")
             
             # Reset highlighted items in the list
@@ -328,7 +459,7 @@ class GoogleLoginTool(QMainWindow):
         """Load accounts from CSV file"""
         if not file_path:
             # Default to mail.csv in the same directory
-            file_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "mail.csv")
+            file_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data/mail_example.csv")
         
         try:
             self.accounts = []
@@ -357,7 +488,6 @@ class GoogleLoginTool(QMainWindow):
             self.progress_bar.setValue(0)
             
             log_msg = f"Đã tải {len(self.accounts)} tài khoản từ {file_path}"
-            self.log_display.append(log_msg)
             logger.info(log_msg)
             
             # Check if this file matches our checkpoint
@@ -366,7 +496,6 @@ class GoogleLoginTool(QMainWindow):
         except Exception as e:
             error_msg = f"Failed to load CSV file: {str(e)}"
             QMessageBox.critical(self, "Error", error_msg)
-            self.log_display.append(f"ERROR: {error_msg}")
             logger.error(error_msg, exc_info=True)
     
     def start_login_process(self):
@@ -374,14 +503,12 @@ class GoogleLoginTool(QMainWindow):
         if not self.accounts:
             msg = "Không có tài khoản nào được tải. Vui lòng tải file CSV trước."
             QMessageBox.warning(self, "No Accounts", msg)
-            self.log_display.append(f"WARNING: {msg}")
             logger.warning(msg)
             return
             
         if self.login_thread and self.login_thread.isRunning():
             msg = "Quá trình đăng nhập đang chạy."
             QMessageBox.warning(self, "Process Running", msg)
-            self.log_display.append(f"WARNING: {msg}")
             logger.warning(msg)
             return
         
@@ -422,14 +549,12 @@ class GoogleLoginTool(QMainWindow):
         if not self.accounts:
             msg = "Không có tài khoản nào được tải. Vui lòng tải file CSV trước."
             QMessageBox.warning(self, "No Accounts", msg)
-            self.log_display.append(f"WARNING: {msg}")
             logger.warning(msg)
             return
             
         if self.login_thread and self.login_thread.isRunning():
             msg = "Quá trình đăng nhập đang chạy."
             QMessageBox.warning(self, "Process Running", msg)
-            self.log_display.append(f"WARNING: {msg}")
             logger.warning(msg)
             return
         
@@ -437,7 +562,6 @@ class GoogleLoginTool(QMainWindow):
         if not self.checkpoint_data["file"] or self.checkpoint_data["index"] <= 0:
             msg = "Không tìm thấy checkpoint để tiếp tục."
             QMessageBox.warning(self, "No Checkpoint", msg)
-            self.log_display.append(f"WARNING: {msg}")
             logger.warning(msg)
             return
             
@@ -445,7 +569,6 @@ class GoogleLoginTool(QMainWindow):
         if self.current_csv_file != self.checkpoint_data["file"]:
             msg = f"File CSV hiện tại khác với file trong checkpoint. Vui lòng tải file {os.path.basename(self.checkpoint_data['file'])}."
             QMessageBox.warning(self, "File Mismatch", msg)
-            self.log_display.append(f"WARNING: {msg}")
             logger.warning(msg)
             return
         
@@ -490,18 +613,15 @@ class GoogleLoginTool(QMainWindow):
             current_index = self.login_thread.current_index
             if current_index >= 0:
                 if self.save_checkpoint(current_index):
-                    self.log_display.append(f"Đã lưu checkpoint tại tài khoản #{current_index + 1}")
+                    logger.info(f"Đã lưu checkpoint tại tài khoản #{current_index + 1}")
             
             self.login_thread.stop()
             self.status_label.setText("Stopping login process...")
-            self.log_display.append("Đang dừng quá trình đăng nhập...")
             logger.info("Người dùng đã yêu cầu dừng quá trình đăng nhập")
     
     def add_log_message(self, message):
         """Add message to the log display"""
-        self.log_display.append(message)
-        # Tự động cuộn xuống để hiển thị tin nhắn mới nhất
-        self.log_display.verticalScrollBar().setValue(self.log_display.verticalScrollBar().maximum())
+        logger.info(message)
     
     def update_login_status(self, email, status, message):
         """Update the status of an account login attempt"""
@@ -529,6 +649,7 @@ class GoogleLoginTool(QMainWindow):
         
         # Store results
         self.results[email] = {"status": status, "message": message, "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
+        logger.info(f"Account {email}: {status} - {message}")
     
     def update_progress(self, current, total):
         """Update the progress bar"""
@@ -558,7 +679,6 @@ class GoogleLoginTool(QMainWindow):
         failed = total - success - skipped
         
         summary = f"Quá trình đăng nhập hoàn tất\nTổng số tài khoản: {total}\nThành công: {success}\nBỏ qua (email không hợp lệ): {skipped}\nThất bại: {failed}"
-        self.log_display.append(summary)
         logger.info(summary)
         
         QMessageBox.information(
@@ -572,7 +692,6 @@ class GoogleLoginTool(QMainWindow):
         if not self.results:
             msg = "Không có kết quả đăng nhập để xuất."
             QMessageBox.warning(self, "No Results", msg)
-            self.log_display.append(f"WARNING: {msg}")
             logger.warning(msg)
             return
             
@@ -596,13 +715,11 @@ class GoogleLoginTool(QMainWindow):
                 
                 msg = f"Kết quả đã được xuất ra {file_path}"
                 QMessageBox.information(self, "Export Successful", msg)
-                self.log_display.append(msg)
                 logger.info(f"Đã xuất kết quả đăng nhập ra file: {file_path}")
             
             except Exception as e:
                 error_msg = f"Failed to export results: {str(e)}"
                 QMessageBox.critical(self, "Export Error", error_msg)
-                self.log_display.append(f"ERROR: {error_msg}")
                 logger.error(error_msg, exc_info=True)
 
     def get_captcha_event(self):
@@ -625,14 +742,18 @@ class GoogleLoginTool(QMainWindow):
         proxy = self.proxy_input.text().strip()
         self.current_proxy = proxy
         self.proxy_failed = False
-        self.log_display.append(f"Proxy set to: {proxy if proxy else 'No proxy'}")
         logger.info(f"Proxy set to: {proxy if proxy else 'No proxy'}")
+        
+        # Show success message
+        if proxy:
+            QMessageBox.information(self, "Success", f"Proxy đã được set thành công: {proxy}")
+        else:
+            QMessageBox.information(self, "Success", "Đã tắt proxy")
 
     def handle_proxy_failed(self):
         """Handle proxy failure: pause and prompt user to enter a new proxy"""
         self.proxy_failed = True
         self.status_label.setText("Proxy failed. Please enter a new proxy and click Set Proxy, then Resume.")
-        self.log_display.append("Proxy failed. Please enter a new proxy and click Set Proxy, then Resume.")
         logger.warning("Proxy failed. Waiting for user to set a new proxy.")
         self.stop_btn.setEnabled(False)
         self.start_btn.setEnabled(False)
@@ -645,6 +766,10 @@ def main():
     # Thông báo khởi động ứng dụng
     logger.info("=== Khởi động Google Login Tool ===")
     
+    # Khởi tạo monitor mạng
+    monitor = NetworkUsageMonitor()
+    monitor.start()
+
     app = QApplication(sys.argv)
     app.setStyle('Fusion')  # Use Fusion style for a consistent look across platforms
     window = GoogleLoginTool()
@@ -652,6 +777,16 @@ def main():
     
     # Xử lý khi thoát ứng dụng
     exit_code = app.exec_()
+
+    # Đo mức tiêu thụ mạng
+    monitor.stop()
+    mb_used = monitor.get_usage_mb()
+    msg = f"Tổng dung lượng mạng đã sử dụng: {mb_used:.2f} MB"
+    print(msg)
+    logger.info(msg)
+    # Hiển thị lên giao diện nếu có
+    if hasattr(window, 'network_usage_label') and window.network_usage_label:
+        window.network_usage_label.setText(f"Mức tiêu thụ mạng: {mb_used:.2f} MB")
     logger.info("=== Kết thúc Google Login Tool ===")
     return exit_code
 

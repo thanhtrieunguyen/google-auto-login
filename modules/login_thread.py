@@ -114,9 +114,9 @@ class LoginThread(QThread):
                     time.sleep(2)
                     page_source = self.driver.page_source
                     if (
-                        "This site can’t be reached" in page_source
+                        "This site can't be reached" in page_source
                         or "took too long to respond" in page_source
-                        or "didn’t send any data" in page_source
+                        or "didn't send any data" in page_source
                         or "<body></body>" in page_source.replace(" ", "").lower()
                         or len(page_source.strip()) < 1000
                     ):
@@ -126,19 +126,6 @@ class LoginThread(QThread):
                         time.sleep(2)
                         attempt += 1
                         continue
-
-                    # --- Nhấn nút Tiếp theo đầu tiên khi chưa nhập email ---
-                    try:
-                        self.log_message.emit("Nhấn nút Tiếp theo đầu tiên (chưa nhập email)")
-                        self.logger.debug("Nhấn nút Tiếp theo đầu tiên (chưa nhập email)")
-                        first_next_btn = WebDriverWait(self.driver, 5).until(
-                            EC.element_to_be_clickable((By.CSS_SELECTOR, "#identifierNext button"))
-                        )
-                        first_next_btn.click()
-                        time.sleep(1)
-                    except Exception as e:
-                        self.logger.debug(f"Không nhấn được nút Tiếp theo đầu tiên: {e}")
-                        # Không bắt buộc, có thể tiếp tục nếu không nhấn được
 
                     # --- Sau đó nhập email và nhấn Tiếp theo như bình thường ---
                     email_step_success = False
@@ -168,9 +155,9 @@ class LoginThread(QThread):
                             time.sleep(2)
                             page_source = self.driver.page_source
                             if (
-                                "This site can’t be reached" in page_source
+                                "This site can't be reached" in page_source
                                 or "took too long to respond" in page_source
-                                or "didn’t send any data" in page_source
+                                or "didn't send any data" in page_source
                                 or "<body></body>" in page_source.replace(" ", "").lower()
                                 or len(page_source.strip()) < 1000
                             ):
@@ -258,6 +245,9 @@ class LoginThread(QThread):
                         EC.presence_of_element_located((By.CSS_SELECTOR, ".Ekjuhf.Jj6Lae, .o6cuMc"))
                     )
                     error_text = error_msg_elem.text
+                    if "Couldn't find your Google Account" in error_text:
+                        self.logger.warning(f"Không tìm thấy tài khoản Google: {email} - {error_text}")
+                        return "SKIPPED", f"Không tìm thấy tài khoản Google: {error_text}"
                     if "Enter a valid email" in error_text or "valid email or phone number" in error_text:
                         self.logger.warning(f"Email không hợp lệ: {email} - {error_text}")
                         return "SKIPPED", f"Email không hợp lệ: {error_text}"
@@ -280,16 +270,16 @@ class LoginThread(QThread):
                     password_field.send_keys(u'\ue007')  # ENTER key
                     time.sleep(3)
 
-                    # --- Kiểm tra nếu xuất hiện trang "Verify it’s you" ---
+                    # --- Kiểm tra nếu xuất hiện trang "Verify it's you" ---
                     page_source = self.driver.page_source
                     if (
-                        "Verify it’s you" in page_source
+                        "Verify it's you" in page_source
                         or "To help keep your account safe" in page_source
-                        or "Google wants to make sure it’s really you" in page_source
+                        or "Google wants to make sure it's really you" in page_source
                         or "help keep your account safe" in page_source
                     ):
-                        self.logger.warning(f"Tài khoản {email} bị yêu cầu xác minh 'Verify it’s you', bỏ qua tài khoản này.")
-                        return "SKIPPED", "Bị yêu cầu xác minh 'Verify it’s you', bỏ qua tài khoản này"
+                        self.logger.warning(f"Tài khoản {email} bị yêu cầu xác minh 'Verify it's you', bỏ qua tài khoản này.")
+                        return "SKIPPED", "Bị yêu cầu xác minh 'Verify it's you', bỏ qua tài khoản này"
 
                     try:
                         wrong_password_error = WebDriverWait(self.driver, 5).until(
@@ -320,7 +310,7 @@ class LoginThread(QThread):
                 return_status = None
                 try:
                     self.log_message.emit("Kiểm tra đăng nhập thành công")
-                    WebDriverWait(self.driver, 10).until(
+                    WebDriverWait(self.driver, 30).until(
                         lambda driver: "myaccount.google.com" in driver.current_url or 
                                      "mail.google.com" in driver.current_url
                     )
@@ -353,7 +343,7 @@ class LoginThread(QThread):
                 # Thêm nhận diện lỗi proxy/connection refused
                 if (
                     "proxy" in error_str.lower()
-                    or "site can\’t be reached" in error_str.lower()
+                    or "site can\'t be reached" in error_str.lower()
                     or "connection refused" in error_str.lower()
                     or "max retries exceeded" in error_str.lower()
                     or "failed to establish a new connection" in error_str.lower()
@@ -393,12 +383,33 @@ class LoginThread(QThread):
 
         if browser_type == "chrome":
             options = ChromeOptions()
+            # --- SỬ DỤNG PROFILE THẬT CỦA CHROME ---
+            # user_data_dir = r"C:\Users\trieunth\AppData\Local\Google\Chrome\User Data"  # <-- sửa lại đúng user của bạn
+            # profile_dir = "Profile 18"  # hoặc tên profile bạn muốn
+            # if os.path.exists(user_data_dir):
+            #     options.add_argument(f"--user-data-dir={user_data_dir}")
+            #     options.add_argument(f"--profile-directory={profile_dir}")
+            #     self.logger.info(f"Dùng profile Chrome: {user_data_dir} [{profile_dir}]")
+            # --- GIẢM PHÁT HIỆN AUTOMATION ---
+            options.add_experimental_option("excludeSwitches", ["enable-automation"])
+            options.add_experimental_option('useAutomationExtension', False)
+            options.add_argument("--disable-blink-features=AutomationControlled")
+            # --- USER-AGENT (nếu muốn) ---
+            options.add_argument("user-agent=Mozilla/5.0 (Macintosh; Intel Mac OS X 13_4) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.6367.60 Safari/537.36")
             if proxy:
                 options.add_argument(f'--proxy-server={proxy}')
             if self.headless:
                 options.add_argument("--headless")
             self.logger.info("Khởi tạo trình duyệt Chrome")
-            return webdriver.Chrome(options=options)
+            driver = webdriver.Chrome(options=options)
+            # Ẩn navigator.webdriver
+            try:
+                driver.execute_cdp_cmd('Page.addScriptToEvaluateOnNewDocument', {
+                    'source': 'Object.defineProperty(navigator, "webdriver", {get: () => undefined})'
+                })
+            except Exception as e:
+                self.logger.warning(f"Không thể ẩn navigator.webdriver: {e}")
+            return driver
         elif browser_type == "firefox":
             options = FirefoxOptions()
             if proxy:
